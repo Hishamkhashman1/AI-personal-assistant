@@ -20,4 +20,4 @@ def get_latest_meeting():
 
     latest = files[-1]
     with open(os.path.join(BASE_PATH, latest), "r") as f:
-        return f.read
+        return f.read()
