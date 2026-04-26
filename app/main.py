@@ -1,15 +1,24 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, UploadFile, File, Form
 from pydantic import BaseModel
+from pathlib import Path
+import shutil
+import os
+
+
 from app.summarizer import summarize_meeting
 from app.memory import save_meeting, get_latest_meeting
 from app.persona import build_persona_prompt
+from app.transcriber import transcribe_audio
 from openai import OpenAI
-import os
+
 
 #initiate Fastapi app
 app = FastAPI()
 
 ai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+
+AUDIO_DIR = Path("audio_samples")
+AUDIO_DIR.mkdir(exist_ok=True)
 
 class MeetingInput(BaseModel):
     title: str
@@ -19,6 +28,27 @@ class QuestionInput(BaseModel):
     question: str
 
 # Now define endpoints
+@app.post("/meeting/audio")
+def process_audio_meeeting(
+    title: str = Form(...),
+    file: UploadFile = File(...)
+):
+    audio_path = AUDIO_DIR / file.filename
+
+    with audio_path.open("wb") as buffer:
+        shutil.copyfileobj(file.file, buffer)
+
+    transcript = transcribe_audio(file.filename)
+
+    path = save_meeting(title, transcript)
+    summary = summarize_meeting(transcript)
+
+    return {
+        "saved_audio_to": str(audio_path),
+        "saved_transcript_to": path,
+        "transcript": transcript,
+        "analysis": summary,
+        }
 
 @app.post("/meeting")
 def process_meeting(data: MeetingInput):
