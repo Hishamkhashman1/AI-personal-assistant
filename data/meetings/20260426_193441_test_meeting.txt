@@ -1,0 +1,1 @@
+John said the dashboard prototype is due by the 25th. Sarah said the KPI list will be finalized tomorrow. Maria raised concerns about LATAM data quality. Alex said user-level filtering would delay release by 3 to 4 days. John will follow up with DevOps about the deployment environment.

@@ -1,0 +1,49 @@
+[09:00] John (PM): Alright everyone, thanks for joining. The goal today is to align on the dashboard project timeline and clarify responsibilities.
+
+[09:01] Sarah (Client): Yes, from our side we want to make sure the first version is ready before the end of the month. Ideally around the 25th.
+
+[09:02] Alex (Backend): That timeline is a bit tight given we still don’t have finalized data schemas. We can build a draft version, but it may not reflect final data.
+
+[09:03] John (PM): Understood. Can we agree on delivering a prototype first, then iterate?
+
+[09:04] Sarah (Client): That works, but we need something presentable to stakeholders.
+
+[09:05] Maria (Data): One concern is data quality. Right now, we’re seeing inconsistencies in the incoming datasets, especially from the LATAM region.
+
+[09:06] Alex (Backend): Yes, and that’s going to affect dashboard accuracy. We need at least basic validation in place.
+
+[09:07] John (PM): Okay, so action item there—data validation pipeline. Maria, can you take lead on that?
+
+[09:08] Maria (Data): Yes, but I’ll need support from backend for integration.
+
+[09:09] Alex (Backend): That’s fine, I can allocate some time this week.
+
+[09:10] Sarah (Client): Another point—we want user-level filtering in the dashboard. Is that included?
+
+[09:11] John (PM): Not in the initial scope, but we can prioritize it if needed.
+
+[09:12] Alex (Backend): Adding that now will delay the release by at least 3–4 days.
+
+[09:13] Sarah (Client): Then maybe we push it to phase 2.
+
+[09:14] John (PM): Agreed. Let’s keep MVP focused.
+
+[09:15] Maria (Data): Also, we need clarity on which KPIs are final. The list keeps changing.
+
+[09:16] Sarah (Client): I’ll send a finalized KPI list by tomorrow.
+
+[09:17] John (PM): Perfect. That’s critical for development.
+
+[09:18] Alex (Backend): One more risk—deployment environment isn’t fully set up yet.
+
+[09:19] John (PM): Who owns that?
+
+[09:20] Alex (Backend): DevOps team, but we need to follow up.
+
+[09:21] John (PM): Okay, I’ll reach out to them today.
+
+[09:22] Sarah (Client): Sounds good.
+
+[09:23] John (PM): Alright, to recap—we aim for a prototype by the 25th, finalize KPIs tomorrow, and start data validation immediately.
+
+[09:24] John (PM): Thanks everyone.
