@@ -42,4 +42,4 @@ def transcribe_audio(audio_filename: str) -> str:
 
 # just for testing remove later
 
-transcribe_audio("test.wav")
+transcribe_audio("test_sp.wav")
