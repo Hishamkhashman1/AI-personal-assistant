@@ -20,6 +20,16 @@ ai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 AUDIO_DIR = Path("audio_samples")
 AUDIO_DIR.mkdir(exist_ok=True)
 
+def process_meeting_transcript(title, transcript):
+    path = save_meeting(title, transcript)
+    summary = summarize_meeting(transcript)
+    return {
+        "saved_transcript_to": path,
+        "analysis": summary,
+    }
+
+   
+
 class MeetingInput(BaseModel):
     title: str
     transcript: str
@@ -40,25 +50,16 @@ def process_audio_meeeting(
 
     transcript = transcribe_audio(file.filename)
 
-    path = save_meeting(title, transcript)
-    summary = summarize_meeting(transcript)
-
+    meeting_result = process_meeting_transcript(title, transcript) 
     return {
         "saved_audio_to": str(audio_path),
-        "saved_transcript_to": path,
         "transcript": transcript,
-        "analysis": summary,
+        **meeting_result
         }
 
 @app.post("/meeting")
 def process_meeting(data: MeetingInput):
-    path = save_meeting(data.title, data.transcript)
-    summary = summarize_meeting(data.transcript)
-
-    return {
-            "saved_to": path,
-            "analysis": summary
-            }
+    return process_meeting_transcript(data.title, data.transcript)
 
 @app.post("/ask")
 def ask_question(data: QuestionInput):
