@@ -40,7 +40,7 @@ def ask_question(data: QuestionInput):
     response = ai_client.chat.completions.create(
         model="gpt-4o-mini",
         messages=[{"role":"user", "content": prompt}],
-        temprature=0.4,
+        temperature=0.4,
     )
 
     return {
