@@ -6,6 +6,7 @@ from app.persona import build_persona_prompt
 from openai import OpenAI
 import os
 
+#initiate Fastapi app
 app = FastAPI()
 
 ai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
