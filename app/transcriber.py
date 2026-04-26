@@ -37,6 +37,9 @@ def transcribe_audio(audio_filename: str) -> str:
             model="gpt-4o-mini-transcribe",
             file=audio_file,
         )
-
+    print(transcript.text) # for testing remove later
     return transcript.text
 
+# just for testing remove later
+
+transcribe_audio("test.wav")
