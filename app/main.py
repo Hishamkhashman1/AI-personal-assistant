@@ -57,6 +57,12 @@ def process_audio_meeeting(
         **meeting_result
         }
 
+@app.post("/meeting/join")
+
+
+@app.get("/job/{job_id}")
+
+
 @app.post("/meeting")
 def process_meeting(data: MeetingInput):
     return process_meeting_transcript(data.title, data.transcript)
