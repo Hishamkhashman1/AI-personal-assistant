@@ -13,7 +13,20 @@ def join_meeting_job(meeting_url: str, title: str):
             page = browser.new_page()
             page.goto(meeting_url, wait_until="domcontentloaded", timeout=60_000)
             print("Page opened successfully")
-            page.wait_for_timeout(10_000)
+            page.wait_for_timeout(3000)
+
+            name_input = page.locator("input[type='text']")
+            if name_input.count() > 0:
+                name_input.first.fill("Hisham Jr.")
+
+            join_button = page.locator("button:has-text('Join')")
+            if join_button.count() > 0:
+                join_button.first.click()
+            else:
+                ask_button = page.locator("button:has-text('Ask')")
+                if ask_button.count() > 0:
+                    ask_button.first.click()
+            page.wait_for_timeout(15000)
 
             print(f"Browser session finished for {title}")
         finally:
