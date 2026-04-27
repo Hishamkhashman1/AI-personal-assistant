@@ -9,6 +9,13 @@ from app.summarizer import summarize_meeting
 from app.memory import save_meeting, get_latest_meeting
 from app.persona import build_persona_prompt
 from app.transcriber import transcribe_audio
+from app.queue import queue
+from app.jobs import join_meeting_job
+
+from rq.job import Job
+from app.queue import redis_conn
+
+
 from openai import OpenAI
 
 
@@ -37,6 +44,10 @@ class MeetingInput(BaseModel):
 class QuestionInput(BaseModel):
     question: str
 
+class JoinMeeting(BaseModel):
+    title: str
+    meeting_url: str
+
 # Now define endpoints
 @app.post("/meeting/audio")
 def process_audio_meeeting(
@@ -58,13 +69,29 @@ def process_audio_meeeting(
         }
 
 @app.post("/meeting/join")
+def join_meeting(data: JoinMeeting):
 # enqueue job (with thos parameters)
+    job = queue.enqueue(
+            join_meeting_job,
+            data.meeting_url,
+            data.title
+    )
 #return {job_id, status: "queued"}
+    return {
+        "job_id": job.id,
+        "status": "queued"
+    }
 
 @app.get("/job/{job_id}")
+def get_job_status(job_id: str):
 #fetch job from queue/storage
+    job = Job.fetch(job_id, connection=redis_conn)
 #return {job_id, status}
-
+    return {
+        "job_id": job.id,
+        "status": job.get_status(),
+        "result": job.result
+    }
 @app.post("/meeting")
 def process_meeting(data: MeetingInput):
     return process_meeting_transcript(data.title, data.transcript)

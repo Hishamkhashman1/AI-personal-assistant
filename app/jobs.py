@@ -1,6 +1,6 @@
 import time 
 
-def join_meeting_url(meeting_url: str, title: str):
+def join_meeting_job(meeting_url: str, title: str):
     print(f"Job Started for: {title}")
     print(f"Meeting URL:{meeting_url}")
 
