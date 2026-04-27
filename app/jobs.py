@@ -29,8 +29,8 @@ def join_meeting_job(meeting_url: str, title: str):
             print("Page opened successfully")
             page.wait_for_timeout(3000)
 
-            name_input = page.locator("input[type='text']")
-            if name_input.count() > 0:
+            name_input = page.get_by_label("Your name")
+            if name_input.count() > 0 and name_input.first.is_visible():
                 name_input.first.fill("Hisham Jr.")
 
             join_button = page.locator("button:has-text('Join')")
