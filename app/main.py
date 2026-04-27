@@ -58,10 +58,12 @@ def process_audio_meeeting(
         }
 
 @app.post("/meeting/join")
-
+# enqueue job (with thos parameters)
+#return {job_id, status: "queued"}
 
 @app.get("/job/{job_id}")
-
+#fetch job from queue/storage
+#return {job_id, status}
 
 @app.post("/meeting")
 def process_meeting(data: MeetingInput):
