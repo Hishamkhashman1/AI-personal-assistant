@@ -33,11 +33,11 @@ def join_meeting_job(meeting_url: str, title: str):
             if name_input.count() > 0 and name_input.first.is_visible():
                 name_input.first.fill("Hisham Jr.")
 
-            join_button = page.locator("button:has-text('Join')")
+            join_button = page.get_by_role("button", name="Join now")
             if join_button.count() > 0:
                 join_button.first.click()
             else:
-                ask_button = page.locator("button:has-text('Ask')")
+                ask_button = page.get_by_role("button",name="Ask to join")
                 if ask_button.count() > 0:
                     ask_button.first.click()
             page.wait_for_timeout(60000)
