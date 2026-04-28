@@ -158,6 +158,57 @@ def _handle_media_prompt(page) -> bool:
     return False
 
 
+def _ensure_microphone_muted(page) -> bool:
+    if _find_visible_button_by_patterns(
+        page,
+        [
+            r"turn on microphone",
+            r"unmute microphone",
+            r"microphone is off",
+            r"mic is off",
+        ],
+    ):
+        return True
+
+    mic_button = _find_visible_button_by_patterns(
+        page,
+        [
+            r"turn off microphone",
+            r"mute microphone",
+            r"microphone is on",
+            r"mic is on",
+            r"microphone",
+            r"\bmic\b",
+        ],
+    )
+    if not mic_button:
+        mic_button = _first_visible(
+            page.get_by_role("button", name=re.compile(r"microphone|mic", re.I))
+        )
+
+    if not mic_button:
+        return False
+
+    try:
+        _log("muting microphone")
+        _update_job_meta("muting_microphone")
+        mic_button.click()
+        page.wait_for_timeout(500)
+        return bool(
+            _find_visible_button_by_patterns(
+                page,
+                [
+                    r"turn on microphone",
+                    r"unmute microphone",
+                    r"microphone is off",
+                    r"mic is off",
+                ],
+            )
+        )
+    except Exception:
+        return False
+
+
 def _body_text(page) -> str:
     try:
         return page.locator("body").inner_text(timeout=2000).lower()
@@ -639,6 +690,8 @@ def _wait_for_join_completion(page, timeout_ms: int = POSTJOIN_TIMEOUT_MS) -> st
     last_reported_bucket = -1
 
     for _ in range(timeout_ms // 500):
+        _ensure_microphone_muted(page)
+
         elapsed_seconds = int(monotonic() - start)
         report_bucket = elapsed_seconds // 5
         if report_bucket != last_reported_bucket:
@@ -707,6 +760,7 @@ def monitor_meeting_job(meeting_url: str, title: str):
 
         meeting_ai = MeetingAISession(title)
         _ensure_captions_enabled(page)
+        _ensure_microphone_muted(page)
         alone_since = None
         job = get_current_job()
         assistant_messages_sent = bool(job and job.meta.get("assistant_messages_sent"))
@@ -724,6 +778,8 @@ def monitor_meeting_job(meeting_url: str, title: str):
                     if final_artifacts:
                         result.update(final_artifacts)
                     return result
+
+                _ensure_microphone_muted(page)
 
                 leave_reason, leave_detail = _meeting_leave_reason(page)
                 if leave_reason == "meeting_ended":
@@ -915,6 +971,7 @@ def join_meeting_job(meeting_url: str, title: str):
             _log("loading meeting url")
             page.goto(meeting_url, wait_until="domcontentloaded", timeout=PAGE_TIMEOUT_MS)
             _log(f"meeting page loaded: {page.url}")
+            _ensure_microphone_muted(page)
 
             _update_job_meta("waiting_prejoin", "0s elapsed")
             wait_state = _wait_for_prejoin_controls(page, timeout_ms=PREJOIN_TIMEOUT_MS)
