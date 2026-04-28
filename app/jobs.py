@@ -6,12 +6,16 @@ from pathlib import Path
 from rq import get_current_job
 from playwright.sync_api import sync_playwright
 
+from app.task_queue import queue
+
 
 DEBUG_DIR = Path("data/debug_meetings")
 CDP_ENDPOINT = "http://127.0.0.1:9222"
 PREJOIN_TIMEOUT_MS = 45_000
 PAGE_TIMEOUT_MS = 30_000
 POSTJOIN_TIMEOUT_MS = 45_000
+MONITOR_POLL_MS = 10_000
+ALONE_GRACE_SECONDS = 30
 
 
 def _safe_slug(value: str) -> str:
@@ -138,6 +142,169 @@ def _handle_media_prompt(page) -> bool:
     return False
 
 
+def _body_text(page) -> str:
+    try:
+        return page.locator("body").inner_text(timeout=2000).lower()
+    except Exception:
+        return ""
+
+
+def _meeting_code_from_url(meeting_url: str) -> str | None:
+    match = re.search(r"meet\.google\.com/([a-z0-9-]+)", meeting_url)
+    if match:
+        return match.group(1)
+
+    return None
+
+
+def _find_meeting_page(context, meeting_url: str):
+    meeting_code = _meeting_code_from_url(meeting_url)
+    normalized_url = meeting_url.split("?")[0].rstrip("/")
+
+    for page in context.pages:
+        try:
+            page_url = page.url.split("?")[0].rstrip("/")
+        except Exception:
+            continue
+
+        if meeting_code and meeting_code in page_url:
+            return page
+
+        if page_url == normalized_url:
+            return page
+
+    return None
+
+
+def _probe_people_panel(page) -> bool:
+    people_button = _first_visible(page.get_by_role("button", name=re.compile(r"^People$", re.I)))
+    if not people_button:
+        return False
+
+    body_text = _body_text(page)
+    if re.search(r"\bcontributors\b\s*0\b", body_text, re.I):
+        return True
+
+    opened_here = False
+    try:
+        _log("probing people panel for participant count")
+        people_button.click()
+        opened_here = True
+        page.wait_for_timeout(1200)
+
+        panel_text = _body_text(page)
+        if re.search(r"\bcontributors\b\s*1\b", panel_text, re.I):
+            return True
+
+        if re.search(r"\bin the meeting\b[\s\S]{0,120}\b1\b", panel_text, re.I):
+            return True
+
+        if re.search(r"\bonly you\b", panel_text, re.I):
+            return True
+
+        return False
+    finally:
+        if opened_here:
+            try:
+                people_button.click()
+                page.wait_for_timeout(500)
+            except Exception:
+                pass
+
+
+def _meeting_leave_reason(page):
+    body_text = _body_text(page)
+
+    ended_patterns = [
+        r"meeting has ended",
+        r"this video call has ended",
+        r"you left the meeting",
+    ]
+    alone_patterns = [
+        r"you're the only one here",
+        r"you are the only one here",
+        r"no one else is here",
+        r"you're the last one here",
+        r"1 participant",
+        r"1 person",
+        r"only you",
+    ]
+
+    for pattern in ended_patterns:
+        if re.search(pattern, body_text, re.I):
+            return "meeting_ended", pattern
+
+    for pattern in alone_patterns:
+        if re.search(pattern, body_text, re.I):
+            return "alone", pattern
+
+    if _probe_people_panel(page):
+        return "alone", "people_panel_contributors_1"
+
+    return None, None
+
+
+def _click_leave_controls(page):
+    leave_candidates = [
+        page.get_by_role("button", name=re.compile(r"^Leave call$")),
+        page.get_by_role("button", name=re.compile(r"^Leave meeting$")),
+        page.get_by_role("button", name=re.compile(r"^End meeting for all$")),
+        page.locator('button:has-text("Leave call")'),
+        page.locator('button:has-text("Leave meeting")'),
+        page.locator('button:has-text("End meeting for all")'),
+    ]
+
+    for candidate in leave_candidates:
+        visible = _first_visible(candidate)
+        if visible:
+            _log("clicking leave control")
+            visible.click()
+            page.wait_for_timeout(1000)
+            return True
+
+    return False
+
+
+def _leave_meeting(page):
+    if page.is_closed():
+        return
+
+    _click_leave_controls(page)
+
+    confirm_candidates = [
+        page.get_by_role("button", name=re.compile(r"^Leave$")),
+        page.get_by_role("button", name=re.compile(r"^Leave meeting$")),
+        page.get_by_role("button", name=re.compile(r"^End meeting for all$")),
+        page.locator('button:has-text("Leave")'),
+        page.locator('button:has-text("Leave meeting")'),
+        page.locator('button:has-text("End meeting for all")'),
+    ]
+
+    for candidate in confirm_candidates:
+        visible = _first_visible(candidate)
+        if visible:
+            _log("confirming leave")
+            visible.click()
+            page.wait_for_timeout(1000)
+            break
+
+
+def _queue_monitor_job(meeting_url: str, title: str):
+    try:
+        monitor_job = queue.enqueue(
+            monitor_meeting_job,
+            meeting_url,
+            title,
+            job_timeout=60 * 60 * 12,
+        )
+        _log(f"queued leave monitor job {monitor_job.id}")
+        _update_job_meta("monitor_queued", monitor_job.id)
+        return monitor_job.id
+    except Exception as error:
+        _log(f"failed to queue leave monitor job: {error}")
+        return None
+
+
 def _wait_for_join_completion(page, timeout_ms: int = POSTJOIN_TIMEOUT_MS) -> str:
     start = monotonic()
     last_reported_bucket = -1
@@ -170,6 +337,113 @@ def _wait_for_join_completion(page, timeout_ms: int = POSTJOIN_TIMEOUT_MS) -> st
         page.wait_for_timeout(500)
 
     return "timeout"
+
+
+def monitor_meeting_job(meeting_url: str, title: str):
+    _log(f"monitor started for: {title}")
+    _log(f"monitoring meeting url: {meeting_url}")
+    _update_job_meta("monitoring", meeting_url)
+
+    with sync_playwright() as p:
+        try:
+            browser = p.chromium.connect_over_cdp(CDP_ENDPOINT)
+        except Exception as error:
+            _update_job_meta("monitor_browser_not_running", str(error))
+            return {
+                "title": title,
+                "meeting_url": meeting_url,
+                "status": "browser_not_running",
+                "reason": f"Start the bot browser first: {error}",
+            }
+
+        if not browser.contexts:
+            _update_job_meta("monitor_browser_not_ready")
+            return {
+                "title": title,
+                "meeting_url": meeting_url,
+                "status": "browser_not_ready",
+                "reason": "No browser context available on the running Chrome session",
+            }
+
+        context = browser.contexts[0]
+        page = _find_meeting_page(context, meeting_url)
+        if not page:
+            _update_job_meta("monitor_page_missing", "meeting tab not found")
+            return {
+                "title": title,
+                "meeting_url": meeting_url,
+                "status": "not_found",
+                "reason": "Meeting tab was not found in the running Chrome session",
+            }
+
+        alone_since = None
+        try:
+            while True:
+                if page.is_closed():
+                    _update_job_meta("left", "meeting tab closed")
+                    return {
+                        "title": title,
+                        "meeting_url": meeting_url,
+                        "status": "left",
+                        "reason": "Meeting tab closed",
+                    }
+
+                leave_reason, leave_detail = _meeting_leave_reason(page)
+                if leave_reason == "meeting_ended":
+                    _log("meeting ended; leaving call")
+                    _update_job_meta("leaving", leave_detail)
+                    _leave_meeting(page)
+                    try:
+                        page.close()
+                    except Exception:
+                        pass
+                    _update_job_meta("left", leave_detail)
+                    return {
+                        "title": title,
+                        "meeting_url": meeting_url,
+                        "status": "left",
+                        "reason": "Meeting ended",
+                    }
+
+                if leave_reason == "alone":
+                    if alone_since is None:
+                        alone_since = monotonic()
+                        _log("bot appears to be alone; waiting before leaving")
+                        _update_job_meta("waiting_to_leave", leave_detail)
+                    elif monotonic() - alone_since >= ALONE_GRACE_SECONDS:
+                        _log("bot is alone; leaving call")
+                        _update_job_meta("leaving", leave_detail)
+                        _leave_meeting(page)
+                        try:
+                            page.close()
+                        except Exception:
+                            pass
+                        _update_job_meta("left", leave_detail)
+                        return {
+                            "title": title,
+                            "meeting_url": meeting_url,
+                            "status": "left",
+                            "reason": "No one else left in the meeting",
+                        }
+                else:
+                    alone_since = None
+
+                page.wait_for_timeout(MONITOR_POLL_MS)
+        except Exception as error:
+            debug = None
+            try:
+                debug = _write_debug_artifacts(page, title, str(error))
+            except Exception:
+                pass
+            _update_job_meta("monitor_failed", str(error))
+            _log(f"monitor failed: {error}")
+            return {
+                "title": title,
+                "meeting_url": meeting_url,
+                "status": "failed",
+                "reason": str(error),
+                "debug": debug,
+            }
 
 
 def _write_debug_artifacts(page, title: str, reason: str):
@@ -240,6 +514,7 @@ def join_meeting_job(meeting_url: str, title: str):
         page = context.new_page()
         _log("created worker page")
         keep_page_open = False
+        monitor_job_id = None
 
         try:
             _update_job_meta("loading_meet_home")
@@ -277,11 +552,13 @@ def join_meeting_job(meeting_url: str, title: str):
             if wait_state == "joined":
                 _update_job_meta("joined", "already inside meeting")
                 keep_page_open = True
+                monitor_job_id = _queue_monitor_job(meeting_url, title)
                 return {
                     "title": title,
                     "meeting_url": meeting_url,
                     "status": "joined",
                     "reason": "Bot was already inside the meeting",
+                    **({"monitor_job_id": monitor_job_id} if monitor_job_id else {}),
                 }
 
             if wait_state == "blocked":
@@ -346,10 +623,12 @@ def join_meeting_job(meeting_url: str, title: str):
             if postjoin_state == "joined":
                 _update_job_meta("joined", "meeting UI detected after click")
                 keep_page_open = True
+                monitor_job_id = _queue_monitor_job(meeting_url, title)
                 return {
                     "title": title,
                     "meeting_url": meeting_url,
                     "status": "joined",
+                    **({"monitor_job_id": monitor_job_id} if monitor_job_id else {}),
                 }
 
             if postjoin_state == "blocked":
