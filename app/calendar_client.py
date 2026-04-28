@@ -70,7 +70,7 @@ def calendar_integration():
     # Prints the start and name of the next 10 events
     for event in events:
       start = event["start"].get("dateTime", event["start"].get("date"))
-      print(start, event["summary"])
+      print(start, event["summary"], event.get("hangoutLink"))
 
   except HttpError as error:
     print(f"An error occurred: {error}")
