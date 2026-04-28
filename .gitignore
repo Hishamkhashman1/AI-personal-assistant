@@ -14,3 +14,5 @@ data/generated_camera/
 data/debug_meetings/
 .log
 browser_profiles
+__pycache__/
+
