@@ -6,6 +6,8 @@ from pathlib import Path
 from rq import get_current_job
 from playwright.sync_api import sync_playwright
 
+from app.meeting_ai import MeetingAISession
+from app.ntfy_client import send_meeting_report
 from app.task_queue import queue
 
 
@@ -163,6 +165,13 @@ def _body_text(page) -> str:
         return ""
 
 
+def _body_text_raw(page) -> str:
+    try:
+        return page.locator("body").inner_text(timeout=2000)
+    except Exception:
+        return ""
+
+
 def _meeting_code_from_url(meeting_url: str) -> str | None:
     match = re.search(r"meet\.google\.com/([a-z0-9-]+)", meeting_url)
     if match:
@@ -270,7 +279,10 @@ def _read_contributor_count(page):
     return None
 
 
-def _open_chat_panel(page):
+def _ensure_chat_panel_open(page):
+    if _find_chat_input(page):
+        return True
+
     chat_button = _first_visible(
         page.get_by_role("button", name=re.compile(r"^Chat with everyone$", re.I))
     )
@@ -285,7 +297,31 @@ def _open_chat_panel(page):
     _log("opening chat panel")
     chat_button.click()
     page.wait_for_timeout(1200)
-    return True
+    return _find_chat_input(page) is not None
+
+
+def _ensure_captions_enabled(page):
+    if page.get_by_role("button", name=re.compile(r"^Turn off captions$", re.I)).count() > 0:
+        return True
+
+    captions_button = _first_visible(
+        page.get_by_role("button", name=re.compile(r"^Turn on captions$", re.I))
+    )
+    if not captions_button:
+        captions_button = _first_visible(
+            page.locator('button:has-text("Turn on captions")')
+        )
+
+    if not captions_button:
+        return False
+
+    try:
+        _log("enabling captions")
+        captions_button.click()
+        page.wait_for_timeout(1200)
+        return True
+    except Exception:
+        return False
 
 
 def _find_chat_input(page):
@@ -307,7 +343,11 @@ def _find_chat_input(page):
 def _send_chat_message(page, message: str) -> bool:
     chat_input = _find_chat_input(page)
     if not chat_input:
-        return False
+        if not _ensure_chat_panel_open(page):
+            return False
+        chat_input = _find_chat_input(page)
+        if not chat_input:
+            return False
 
     try:
         _log(f"sending chat message: {message}")
@@ -327,15 +367,17 @@ def _send_chat_message(page, message: str) -> bool:
             return False
 
 
-def _send_assistant_intro_messages(page, title: str) -> bool:
+def _send_assistant_intro_messages(page, title: str, session: MeetingAISession | None = None) -> bool:
     _log("sending assistant intro messages")
     _update_job_meta("sending_assistant_messages", title)
 
-    if not _open_chat_panel(page):
-        _log("failed to open chat panel")
-        return False
-
     for message in ASSISTANT_CHAT_MESSAGES:
+        if session is not None:
+            session.mark_own_message(message)
+        _set_job_meta_value("assistant_message", message)
+        if not _ensure_chat_panel_open(page):
+            _log("failed to open chat panel")
+            return False
         ok = _send_chat_message(page, message)
         if not ok:
             _log("failed to send one of the assistant messages")
@@ -345,6 +387,77 @@ def _send_assistant_intro_messages(page, title: str) -> bool:
     _set_job_meta_value("assistant_messages_sent", True)
     _log("assistant intro messages sent")
     return True
+
+
+def _answer_question_in_chat(page, session: MeetingAISession, question: str) -> bool:
+    _log(f"answering question from meeting text: {question}")
+    _update_job_meta("answering_question", question)
+
+    try:
+        answer = session.generate_answer(question)
+    except Exception as error:
+        _update_job_meta("answer_failed", str(error))
+        _log(f"failed to generate answer: {error}")
+        return False
+
+    session.mark_answered(question)
+    session.mark_own_message(answer)
+
+    if not _send_chat_message(page, answer):
+        _log("failed to send generated answer")
+        return False
+
+    _set_job_meta_value("last_answer", answer)
+    _log("generated answer sent to chat")
+    return True
+
+
+def _maybe_answer_new_questions(page, session: MeetingAISession, contributor_count: int | None):
+    if contributor_count is not None and contributor_count < 2:
+        return
+
+    raw_text = _body_text_raw(page)
+    if not raw_text.strip():
+        return
+
+    new_lines = session.ingest_text(raw_text)
+    for line in new_lines:
+        if not session.should_answer(line):
+            continue
+        if _answer_question_in_chat(page, session, line):
+            page.wait_for_timeout(1200)
+
+
+def _finalize_meeting_ai(session: MeetingAISession, title: str):
+    artifacts = session.finalize()
+    if not artifacts:
+        return None
+
+    _update_job_meta("transcript_saved", artifacts["transcript_path"])
+    _set_job_meta_value("meeting_summary", artifacts["summary"])
+    _log("meeting transcript saved and summary generated")
+
+    try:
+        ntfy_result = send_meeting_report(
+            title=title,
+            transcript=artifacts["transcript"],
+            summary=artifacts["summary"],
+        )
+        artifacts["ntfy"] = ntfy_result
+        if ntfy_result.get("sent"):
+            _update_job_meta("ntfy_sent", ntfy_result.get("topic"))
+        else:
+            _update_job_meta("ntfy_not_sent", ntfy_result.get("reason", "not configured"))
+    except Exception as error:
+        artifacts["ntfy"] = {"sent": False, "reason": str(error)}
+        _update_job_meta("ntfy_failed", str(error))
+        _log(f"failed to send meeting report via ntfy: {error}")
+
+    return {
+        "transcript_path": artifacts["transcript_path"],
+        "summary": artifacts["summary"],
+        "ntfy": artifacts.get("ntfy"),
+    }
 
 
 def _meeting_leave_reason(page):
@@ -511,19 +624,25 @@ def monitor_meeting_job(meeting_url: str, title: str):
                 "reason": "Meeting tab was not found in the running Chrome session",
             }
 
+        meeting_ai = MeetingAISession(title)
+        _ensure_captions_enabled(page)
         alone_since = None
         job = get_current_job()
         assistant_messages_attempted = bool(job and job.meta.get("assistant_messages_attempted"))
         try:
             while True:
                 if page.is_closed():
+                    final_artifacts = _finalize_meeting_ai(meeting_ai, title)
                     _update_job_meta("left", "meeting tab closed")
-                    return {
+                    result = {
                         "title": title,
                         "meeting_url": meeting_url,
                         "status": "left",
                         "reason": "Meeting tab closed",
                     }
+                    if final_artifacts:
+                        result.update(final_artifacts)
+                    return result
 
                 leave_reason, leave_detail = _meeting_leave_reason(page)
                 if leave_reason == "meeting_ended":
@@ -534,13 +653,17 @@ def monitor_meeting_job(meeting_url: str, title: str):
                         page.close()
                     except Exception:
                         pass
+                    final_artifacts = _finalize_meeting_ai(meeting_ai, title)
                     _update_job_meta("left", leave_detail)
-                    return {
+                    result = {
                         "title": title,
                         "meeting_url": meeting_url,
                         "status": "left",
                         "reason": "Meeting ended",
                     }
+                    if final_artifacts:
+                        result.update(final_artifacts)
+                    return result
 
                 if leave_reason == "alone":
                     if alone_since is None:
@@ -555,13 +678,17 @@ def monitor_meeting_job(meeting_url: str, title: str):
                             page.close()
                         except Exception:
                             pass
+                        final_artifacts = _finalize_meeting_ai(meeting_ai, title)
                         _update_job_meta("left", leave_detail)
-                        return {
+                        result = {
                             "title": title,
                             "meeting_url": meeting_url,
                             "status": "left",
                             "reason": "No one else left in the meeting",
                         }
+                        if final_artifacts:
+                            result.update(final_artifacts)
+                        return result
                 else:
                     alone_since = None
 
@@ -574,10 +701,12 @@ def monitor_meeting_job(meeting_url: str, title: str):
                     assistant_messages_attempted = True
                     _set_job_meta_value("assistant_messages_attempted", True)
                     _log(f"detected {contributor_count} contributors; sending assistant intro")
-                    if _send_assistant_intro_messages(page, title):
+                    if _send_assistant_intro_messages(page, title, meeting_ai):
                         _update_job_meta("assistant_messages_sent", str(contributor_count))
                     else:
                         _update_job_meta("assistant_messages_failed", str(contributor_count))
+
+                _maybe_answer_new_questions(page, meeting_ai, contributor_count)
 
                 page.wait_for_timeout(MONITOR_POLL_MS)
         except Exception as error:
@@ -588,13 +717,21 @@ def monitor_meeting_job(meeting_url: str, title: str):
                 pass
             _update_job_meta("monitor_failed", str(error))
             _log(f"monitor failed: {error}")
-            return {
+            final_artifacts = None
+            try:
+                final_artifacts = _finalize_meeting_ai(meeting_ai, title)
+            except Exception:
+                pass
+            result = {
                 "title": title,
                 "meeting_url": meeting_url,
                 "status": "failed",
                 "reason": str(error),
                 "debug": debug,
             }
+            if final_artifacts:
+                result.update(final_artifacts)
+            return result
 
 
 def _write_debug_artifacts(page, title: str, reason: str):
