@@ -5,8 +5,11 @@ def join_meeting_job(meeting_url: str, title: str):
     print(f"Meeting URL:{meeting_url}")
     browser = None
     with sync_playwright() as p:
-        browser = p.chromium.launch(
+        context = p.chromium.launch_persistent_context(
+            user_data_dir="browser_profiles/bot",
             headless=False,
+            locale="en-US",
+            permissions=["camera","microphone"],
             args=[
                 "--no-sandbox",
                 "--disable-dev-shm-usage",
@@ -16,10 +19,6 @@ def join_meeting_job(meeting_url: str, title: str):
                 ],
             )   
         try:
-            context = browser.new_context(
-                    locale="en-us",
-                    permissions=["camera","microphone"]
-            )
             page = context.new_page()
             if "?" in meeting_url:
                 meeting_url += "&hl=en"

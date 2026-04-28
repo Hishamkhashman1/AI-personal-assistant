@@ -11,6 +11,7 @@ from app.persona import build_persona_prompt
 from app.transcriber import transcribe_audio
 from app.task_queue import queue
 from app.jobs import join_meeting_job
+from app.calendar_client import calendar_integration
 
 from rq.job import Job
 from app.task_queue import redis_conn
@@ -69,12 +70,17 @@ def process_audio_meeeting(
         }
 
 @app.post("/meeting/join")
-def join_meeting(data: JoinMeeting):
+def join_meeting():
 # enqueue job (with thos parameters)
+    event = calendar_integration()
+
+    if not event or not event.get("meeting_url"):
+        return {"error":"No upcoming calendar event with hangoutLink found"}
+
     job = queue.enqueue(
             join_meeting_job,
-            data.meeting_url,
-            data.title
+            event["meeting_url"],
+            event["title"],
     )
 #return {job_id, status: "queued"}
     return {
