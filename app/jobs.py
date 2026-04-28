@@ -16,6 +16,11 @@ PAGE_TIMEOUT_MS = 30_000
 POSTJOIN_TIMEOUT_MS = 45_000
 MONITOR_POLL_MS = 10_000
 ALONE_GRACE_SECONDS = 30
+ASSISTANT_CHAT_MESSAGES = [
+    "Hello Guys, I am the assistant bot of Hisham, he is currently unable to join the meeting (fixing portal travel)",
+    "I will do my best to represent him",
+    "Just mention my name and I will do my best to help you, Thanks!",
+]
 
 
 def _safe_slug(value: str) -> str:
@@ -35,6 +40,15 @@ def _update_job_meta(stage: str, detail: str | None = None):
     job.meta["stage"] = stage
     if detail is not None:
         job.meta["detail"] = detail
+    job.save_meta()
+
+
+def _set_job_meta_value(key: str, value):
+    job = get_current_job()
+    if not job:
+        return
+
+    job.meta[key] = value
     job.save_meta()
 
 
@@ -212,6 +226,127 @@ def _probe_people_panel(page) -> bool:
                 pass
 
 
+def _read_contributor_count(page):
+    body_text = _body_text(page)
+    patterns = [
+        r"\bcontributors\b\s*(\d+)",
+        r"\bin the meeting\b[\s\S]{0,120}\bcontributors\b\s*(\d+)",
+    ]
+
+    for pattern in patterns:
+        match = re.search(pattern, body_text, re.I)
+        if match:
+            try:
+                return int(match.group(1))
+            except ValueError:
+                continue
+
+    people_button = _first_visible(page.get_by_role("button", name=re.compile(r"^People$", re.I)))
+    if not people_button:
+        return None
+
+    opened_here = False
+    try:
+        _log("reading contributor count from people panel")
+        people_button.click()
+        opened_here = True
+        page.wait_for_timeout(1200)
+        panel_text = _body_text(page)
+        for pattern in patterns:
+            match = re.search(pattern, panel_text, re.I)
+            if match:
+                try:
+                    return int(match.group(1))
+                except ValueError:
+                    continue
+    finally:
+        if opened_here:
+            try:
+                people_button.click()
+                page.wait_for_timeout(500)
+            except Exception:
+                pass
+
+    return None
+
+
+def _open_chat_panel(page):
+    chat_button = _first_visible(
+        page.get_by_role("button", name=re.compile(r"^Chat with everyone$", re.I))
+    )
+    if not chat_button:
+        chat_button = _first_visible(
+            page.locator('button:has-text("Chat with everyone")')
+        )
+
+    if not chat_button:
+        return False
+
+    _log("opening chat panel")
+    chat_button.click()
+    page.wait_for_timeout(1200)
+    return True
+
+
+def _find_chat_input(page):
+    candidates = [
+        page.get_by_role("textbox", name=re.compile(r"message", re.I)),
+        page.get_by_role("textbox"),
+        page.locator("textarea"),
+        page.locator('[contenteditable="true"]'),
+    ]
+
+    for candidate in candidates:
+        visible = _first_visible(candidate)
+        if visible:
+            return visible
+
+    return None
+
+
+def _send_chat_message(page, message: str) -> bool:
+    chat_input = _find_chat_input(page)
+    if not chat_input:
+        return False
+
+    try:
+        _log(f"sending chat message: {message}")
+        chat_input.click()
+        chat_input.fill(message)
+        chat_input.press("Enter")
+        page.wait_for_timeout(800)
+        return True
+    except Exception:
+        try:
+            chat_input.click()
+            chat_input.press_sequentially(message)
+            chat_input.press("Enter")
+            page.wait_for_timeout(800)
+            return True
+        except Exception:
+            return False
+
+
+def _send_assistant_intro_messages(page, title: str) -> bool:
+    _log("sending assistant intro messages")
+    _update_job_meta("sending_assistant_messages", title)
+
+    if not _open_chat_panel(page):
+        _log("failed to open chat panel")
+        return False
+
+    for message in ASSISTANT_CHAT_MESSAGES:
+        ok = _send_chat_message(page, message)
+        if not ok:
+            _log("failed to send one of the assistant messages")
+            return False
+        page.wait_for_timeout(1200)
+
+    _set_job_meta_value("assistant_messages_sent", True)
+    _log("assistant intro messages sent")
+    return True
+
+
 def _meeting_leave_reason(page):
     body_text = _body_text(page)
 
@@ -377,6 +512,8 @@ def monitor_meeting_job(meeting_url: str, title: str):
             }
 
         alone_since = None
+        job = get_current_job()
+        assistant_messages_attempted = bool(job and job.meta.get("assistant_messages_attempted"))
         try:
             while True:
                 if page.is_closed():
@@ -427,6 +564,20 @@ def monitor_meeting_job(meeting_url: str, title: str):
                         }
                 else:
                     alone_since = None
+
+                contributor_count = _read_contributor_count(page)
+                if (
+                    contributor_count is not None
+                    and contributor_count >= 2
+                    and not assistant_messages_attempted
+                ):
+                    assistant_messages_attempted = True
+                    _set_job_meta_value("assistant_messages_attempted", True)
+                    _log(f"detected {contributor_count} contributors; sending assistant intro")
+                    if _send_assistant_intro_messages(page, title):
+                        _update_job_meta("assistant_messages_sent", str(contributor_count))
+                    else:
+                        _update_job_meta("assistant_messages_failed", str(contributor_count))
 
                 page.wait_for_timeout(MONITOR_POLL_MS)
         except Exception as error:
