@@ -9,6 +9,8 @@ credentials.json
 token.json
 .codex
 codex
-browser_profiles/
+browser_profiles/bot
 data/generated_camera/
 data/debug_meetings/
+.log
+browser_profiles
