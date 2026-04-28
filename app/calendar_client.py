@@ -1,13 +1,3 @@
-# imports
-
-##authenticate with google 
-
-# save token locally
-
-# fetch next event 
-
-# print : event title , start time, meeting link
-
 import datetime
 import os.path
 
@@ -17,67 +7,80 @@ from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 
-# If modifying these scopes, delete the file token.json.
 SCOPES = ["https://www.googleapis.com/auth/calendar.readonly"]
 
 
-def calendar_integration():
-  """Shows basic usage of the Google Calendar API.
-  Prints the start and name of the next 10 events on the user's calendar.
-  """
-  creds = None
-  # The file token.json stores the user's access and refresh tokens, and is
-  # created automatically when the authorization flow completes for the first
-  # time.
-  if os.path.exists("token.json"):
-    creds = Credentials.from_authorized_user_file("token.json", SCOPES)
-  # If there are no (valid) credentials available, let the user log in.
-  if not creds or not creds.valid:
-    if creds and creds.expired and creds.refresh_token:
-      creds.refresh(Request())
-    else:
-      flow = InstalledAppFlow.from_client_secrets_file(
-          "credentials.json", SCOPES
-      )
-      creds = flow.run_local_server(port=0)
-    # Save the credentials for the next run
-    with open("token.json", "w") as token:
-      token.write(creds.to_json())
+def _load_credentials():
+    creds = None
+    if os.path.exists("token.json"):
+        creds = Credentials.from_authorized_user_file("token.json", SCOPES)
 
-  try:
-    service = build("calendar", "v3", credentials=creds)
+    if not creds or not creds.valid:
+        if creds and creds.expired and creds.refresh_token:
+            creds.refresh(Request())
+        else:
+            flow = InstalledAppFlow.from_client_secrets_file("credentials.json", SCOPES)
+            creds = flow.run_local_server(port=0)
 
-    # Call the Calendar API
-    now = datetime.datetime.now(tz=datetime.timezone.utc).isoformat()
-    print("Getting the upcoming 10 events")
-    events_result = (
-        service.events()
-        .list(
-            calendarId="primary",
-            timeMin=now,
-            maxResults=10,
-            singleEvents=True,
-            orderBy="startTime",
+        with open("token.json", "w") as token:
+            token.write(creds.to_json())
+
+    return creds
+
+
+def _extract_meeting_url(event):
+    hangout_link = event.get("hangoutLink")
+    if hangout_link:
+        return hangout_link
+
+    conference_data = event.get("conferenceData") or {}
+    for entry_point in conference_data.get("entryPoints", []):
+        if entry_point.get("entryPointType") == "video" and entry_point.get("uri"):
+            return entry_point["uri"]
+
+    return None
+
+
+def _format_event(event):
+    start = event.get("start", {}).get("dateTime", event.get("start", {}).get("date"))
+    return {
+        "title": event.get("summary", "Untitled meeting"),
+        "start": start,
+        "meeting_url": _extract_meeting_url(event),
+    }
+
+
+def get_upcoming_events(max_results=10):
+    creds = _load_credentials()
+
+    try:
+        service = build("calendar", "v3", credentials=creds)
+        now = datetime.datetime.now(tz=datetime.timezone.utc).isoformat()
+        events_result = (
+            service.events()
+            .list(
+                calendarId="primary",
+                timeMin=now,
+                maxResults=max_results,
+                singleEvents=True,
+                orderBy="startTime",
+            )
+            .execute()
         )
-        .execute()
-    )
-    events = events_result.get("items", [])
+        events = events_result.get("items", [])
+        return [_format_event(event) for event in events]
+    except HttpError as error:
+        print(f"An error occurred: {error}")
+        return []
 
-    if not events:
-      print("No upcoming events found.")
-      return
 
-    # Prints the start and name of the next 10 events
-    for event in events:
-      meeting_url = event.get("hangoutLink")  
-      start = event["start"].get("dateTime", event["start"].get("date"))
-      title = event.get("summary","Untitled meeting")
-      print(start, event["summary"], event.get("hangoutLink"))
-      return {
-         "title": title,
-         "start": start,
-         "meeting_url": meeting_url,
-         }
-  except HttpError as error:
-    print(f"An error occurred: {error}")
-#calendar_integration()
+def get_next_event_with_meet_link(max_results=10):
+    for event in get_upcoming_events(max_results=max_results):
+        if event.get("meeting_url"):
+            return event
+    return None
+
+
+def calendar_integration():
+    """Backward-compatible wrapper for the next Meet-linked event."""
+    return get_next_event_with_meet_link()

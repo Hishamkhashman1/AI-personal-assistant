@@ -9,4 +9,5 @@ credentials.json
 token.json
 .codex
 codex
-
+browser_profiles/
+data/debug_meetings/
