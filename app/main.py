@@ -9,11 +9,11 @@ from app.summarizer import summarize_meeting
 from app.memory import save_meeting, get_latest_meeting
 from app.persona import build_persona_prompt
 from app.transcriber import transcribe_audio
-from app.queue import queue
+from app.task_queue import queue
 from app.jobs import join_meeting_job
 
 from rq.job import Job
-from app.queue import redis_conn
+from app.task_queue import redis_conn
 
 
 from openai import OpenAI
