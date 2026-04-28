@@ -1,0 +1,35 @@
+Press Down Arrow to open the hover tray and Escape to close it.
+frame_person
+Reframe
+visual_effects
+Backgrounds and effects
+more_vert
+More options for Hisham
+Hisham
+Testing4
+keyboard_arrow_up
+mic
+Show more info
+videocam
+computer_arrow_up
+mood
+closed_caption_off
+Turn on captions (c or shift+c)
+back_hand
+Raise hand (ctrl + alt + h)
+call_end
+info
+chat
+apps
+Meeting tools
+Click Allow
+You can still turn off your camera anytime in the meeting.
+Hisham Khashman
+Continuous chat is turned off
+Messages will not be saved for meeting participants when the call ends. You can pin a message to make it visible for people who join later.
+keep
+Pin message
+send
+Send message
+Turn off camera (ctrl + e)
+chat_bubble

@@ -57,6 +57,7 @@ QUESTION_HINTS = [
     r"\bcan you\b",
     r"\bcould you\b",
     r"\bwould you\b",
+    r"\bwhat about\b",
     r"\bwhat is\b",
     r"\bwhat's\b",
     r"\bwhy\b",

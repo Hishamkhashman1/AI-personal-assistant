@@ -309,16 +309,57 @@ def _ensure_chat_panel_open(page, timeout_ms: int = 10_000):
     return _find_chat_input(page) is not None
 
 
+def _find_visible_button_by_patterns(page, patterns):
+    buttons = page.locator("button")
+
+    for index in range(buttons.count()):
+        button = buttons.nth(index)
+        try:
+            if not button.is_visible():
+                continue
+
+            chunks = []
+            for attr in ("aria-label", "title"):
+                value = button.get_attribute(attr)
+                if value:
+                    chunks.append(value)
+
+            try:
+                inner_text = button.inner_text(timeout=500)
+                if inner_text:
+                    chunks.append(inner_text)
+            except Exception:
+                pass
+
+            haystack = " ".join(chunks).strip()
+            if not haystack:
+                continue
+
+            for pattern in patterns:
+                if re.search(pattern, haystack, re.I):
+                    return button
+        except Exception:
+            continue
+
+    return None
+
+
 def _ensure_captions_enabled(page):
-    if page.get_by_role("button", name=re.compile(r"^Turn off captions$", re.I)).count() > 0:
+    if _find_visible_button_by_patterns(page, [r"turn off captions", r"hide captions"]):
         return True
 
     captions_button = _first_visible(
-        page.get_by_role("button", name=re.compile(r"^Turn on captions$", re.I))
+        page.get_by_role("button", name=re.compile(r"captions?|cc", re.I))
     )
     if not captions_button:
-        captions_button = _first_visible(
-            page.locator('button:has-text("Turn on captions")')
+        captions_button = _find_visible_button_by_patterns(
+            page,
+            [
+                r"turn on captions",
+                r"show captions",
+                r"\bcaptions?\b",
+                r"\bcc\b",
+            ],
         )
 
     if not captions_button:
@@ -327,10 +368,41 @@ def _ensure_captions_enabled(page):
     try:
         _log("enabling captions")
         captions_button.click()
-        page.wait_for_timeout(1200)
-        return True
+        page.wait_for_timeout(1800)
+        return _find_visible_button_by_patterns(
+            page, [r"turn off captions", r"hide captions"]
+        ) is not None
     except Exception:
         return False
+
+
+def _live_meeting_text(page) -> str:
+    selectors = [
+        '[aria-live="polite"]',
+        '[aria-live="assertive"]',
+        '[role="log"]',
+        '[jsname="YSxpc"]',
+        '[jsname="fna"]',
+    ]
+
+    chunks = []
+    for selector in selectors:
+        locator = page.locator(selector)
+        for index in range(locator.count()):
+            candidate = locator.nth(index)
+            try:
+                if not candidate.is_visible():
+                    continue
+                text = candidate.inner_text(timeout=800).strip()
+                if text:
+                    chunks.append(text)
+            except Exception:
+                continue
+
+    if chunks:
+        return "\n".join(chunks)
+
+    return _body_text_raw(page)
 
 
 def _find_chat_input(page):
@@ -425,7 +497,7 @@ def _maybe_answer_new_questions(page, session: MeetingAISession, contributor_cou
     if contributor_count is not None and contributor_count < 2:
         return
 
-    raw_text = _body_text_raw(page)
+    raw_text = _live_meeting_text(page)
     if not raw_text.strip():
         return
 
