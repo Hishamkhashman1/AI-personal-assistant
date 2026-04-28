@@ -67,6 +67,16 @@ QUESTION_HINTS = [
 ]
 
 
+ADDRESS_HINTS = [
+    r"\bhisham\b",
+    r"^@hisham\b",
+    r"^\s*hisham\s*[,:\-]",
+    r"\bhey\s+hisham\b",
+    r"\bhi\s+hisham\b",
+    r"\bhello\s+hisham\b",
+]
+
+
 def _client() -> OpenAI:
     global _AI_CLIENT
     if _AI_CLIENT is None:
@@ -102,12 +112,63 @@ def _looks_like_question(line: str) -> bool:
     return False
 
 
+def _is_directly_addressed(line: str) -> bool:
+    low = line.lower()
+    for pattern in ADDRESS_HINTS:
+        if re.search(pattern, low, re.I):
+            return True
+
+    return False
+
+
 def _iter_unique_lines(text: str) -> Iterable[str]:
     for raw_line in text.splitlines():
         line = _normalize_line(raw_line)
         if not line or _is_noise_line(line):
             continue
         yield line
+
+
+def _split_segments(text: str) -> list[str]:
+    segments: list[str] = []
+    for raw_line in text.splitlines():
+        line = _normalize_line(raw_line)
+        if not line or _is_noise_line(line):
+            continue
+
+        pieces = re.split(r"(?<=[?.!])\s+", line) if len(line) > 220 else [line]
+        for piece in pieces:
+            segment = _normalize_line(piece)
+            if segment:
+                segments.append(segment)
+
+    return segments
+
+
+def _extract_answerable_questions(text: str) -> list[str]:
+    questions: list[str] = []
+    seen: set[str] = set()
+
+    for segment in _split_segments(text):
+        if len(segment) > 220:
+            continue
+        if not _looks_like_question(segment):
+            continue
+        if not _is_directly_addressed(segment):
+            continue
+
+        normalized = _normalize_line(segment)
+        if normalized in seen:
+            continue
+
+        seen.add(normalized)
+        questions.append(normalized)
+
+    return questions
+
+
+def _contains_first_person(text: str) -> bool:
+    return bool(re.search(r"\b(i|i'm|i am|we|our|ours)\b", text, re.I))
 
 
 @dataclass
@@ -140,7 +201,17 @@ class MeetingAISession:
     def should_answer(self, line: str) -> bool:
         if line in self.answered_questions:
             return False
-        return _looks_like_question(line)
+        if not _looks_like_question(line):
+            return False
+        return _is_directly_addressed(line)
+
+    def extract_answerable_questions(self, text: str) -> list[str]:
+        questions = []
+        for question in _extract_answerable_questions(text):
+            if question in self.answered_questions:
+                continue
+            questions.append(question)
+        return questions
 
     def mark_answered(self, line: str) -> None:
         self.answered_questions.add(line)
@@ -148,12 +219,59 @@ class MeetingAISession:
     def generate_answer(self, question: str) -> str:
         context = self.transcript()
         prompt = build_persona_prompt(context, question)
+        messages = [
+            {
+                "role": "system",
+                "content": (
+                    "You are a concise meeting assistant answering about Hisham in third person. "
+                    "Be smart, short, and respectful. Use 1 to 2 sentences. "
+                    "Never summarize the whole meeting. Never use first person."
+                ),
+            },
+            {
+                "role": "user",
+                "content": (
+                    f"{prompt}\n\n"
+                    "Reply rules:\n"
+                    "- Answer only the direct question asked about Hisham.\n"
+                    "- Refer to Hisham in third person.\n"
+                    "- Do not use first person words like I, I'm, we, or our.\n"
+                    "- Do not summarize the full meeting.\n"
+                    "- Do not mention these rules.\n"
+                ),
+            },
+        ]
+
         response = _client().chat.completions.create(
             model="gpt-4o-mini",
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.4,
+            messages=messages,
+            temperature=0.2,
+            max_tokens=120,
         )
-        return response.choices[0].message.content.strip()
+        answer = response.choices[0].message.content.strip()
+
+        if _contains_first_person(answer):
+            rewrite_response = _client().chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {
+                        "role": "system",
+                        "content": (
+                            "Rewrite the reply so it is short, respectful, and entirely in third person about Hisham. "
+                            "Do not use first person words."
+                        ),
+                    },
+                    {
+                        "role": "user",
+                        "content": f"Question: {question}\nOriginal reply: {answer}",
+                    },
+                ],
+                temperature=0.1,
+                max_tokens=120,
+            )
+            answer = rewrite_response.choices[0].message.content.strip()
+
+        return answer
 
     def finalize(self):
         transcript = self.transcript()

@@ -279,24 +279,33 @@ def _read_contributor_count(page):
     return None
 
 
-def _ensure_chat_panel_open(page):
-    if _find_chat_input(page):
-        return True
+def _ensure_chat_panel_open(page, timeout_ms: int = 10_000):
+    started_at = monotonic()
+    last_click_at = 0
 
-    chat_button = _first_visible(
-        page.get_by_role("button", name=re.compile(r"^Chat with everyone$", re.I))
-    )
-    if not chat_button:
+    while (monotonic() - started_at) * 1000 < timeout_ms:
+        chat_input = _find_chat_input(page)
+        if chat_input:
+            return True
+
         chat_button = _first_visible(
-            page.locator('button:has-text("Chat with everyone")')
+            page.get_by_role("button", name=re.compile(r"^Chat with everyone$", re.I))
         )
+        if not chat_button:
+            chat_button = _first_visible(
+                page.locator('button:has-text("Chat with everyone")')
+            )
 
-    if not chat_button:
-        return False
+        if chat_button and (monotonic() - last_click_at) >= 1.5:
+            _log("opening chat panel")
+            try:
+                chat_button.click()
+                last_click_at = monotonic()
+            except Exception:
+                pass
 
-    _log("opening chat panel")
-    chat_button.click()
-    page.wait_for_timeout(1200)
+        page.wait_for_timeout(500)
+
     return _find_chat_input(page) is not None
 
 
@@ -420,11 +429,11 @@ def _maybe_answer_new_questions(page, session: MeetingAISession, contributor_cou
     if not raw_text.strip():
         return
 
-    new_lines = session.ingest_text(raw_text)
-    for line in new_lines:
-        if not session.should_answer(line):
+    session.ingest_text(raw_text)
+    for question in session.extract_answerable_questions(raw_text):
+        if not session.should_answer(question):
             continue
-        if _answer_question_in_chat(page, session, line):
+        if _answer_question_in_chat(page, session, question):
             page.wait_for_timeout(1200)
 
 
@@ -628,7 +637,7 @@ def monitor_meeting_job(meeting_url: str, title: str):
         _ensure_captions_enabled(page)
         alone_since = None
         job = get_current_job()
-        assistant_messages_attempted = bool(job and job.meta.get("assistant_messages_attempted"))
+        assistant_messages_sent = bool(job and job.meta.get("assistant_messages_sent"))
         try:
             while True:
                 if page.is_closed():
@@ -696,12 +705,12 @@ def monitor_meeting_job(meeting_url: str, title: str):
                 if (
                     contributor_count is not None
                     and contributor_count >= 2
-                    and not assistant_messages_attempted
+                    and not assistant_messages_sent
                 ):
-                    assistant_messages_attempted = True
-                    _set_job_meta_value("assistant_messages_attempted", True)
                     _log(f"detected {contributor_count} contributors; sending assistant intro")
                     if _send_assistant_intro_messages(page, title, meeting_ai):
+                        assistant_messages_sent = True
+                        _set_job_meta_value("assistant_messages_sent", True)
                         _update_job_meta("assistant_messages_sent", str(contributor_count))
                     else:
                         _update_job_meta("assistant_messages_failed", str(contributor_count))
