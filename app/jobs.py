@@ -7,6 +7,7 @@ def join_meeting_job(meeting_url: str, title: str):
     with sync_playwright() as p:
         context = p.chromium.launch_persistent_context(
             user_data_dir="browser_profiles/bot",
+            channel="chrome",
             headless=False,
             locale="en-US",
             permissions=["camera","microphone"],
@@ -43,8 +44,8 @@ def join_meeting_job(meeting_url: str, title: str):
 
             print(f"Browser session finished for {title}")
         finally:
-            if browser:
-                browser.close()
+            if context:
+                context.close()
 
     return {
         "title": title,
