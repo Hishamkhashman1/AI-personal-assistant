@@ -10,4 +10,5 @@ token.json
 .codex
 codex
 browser_profiles/
+data/generated_camera/
 data/debug_meetings/

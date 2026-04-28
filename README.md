@@ -23,6 +23,12 @@ python launch_bot_chrome.py
 ```
 Keep that Chrome window open while `python worker.py` runs.
 
+If you want Chrome to use a loop video as the bot camera:
+```bash
+python launch_bot_chrome.py --video-file /path/to/your-loop.mp4
+```
+That converts the video to a Chrome fake-camera feed automatically.
+
 ## Calendar and Meet flow
 
 - `GET /calendar/events`
