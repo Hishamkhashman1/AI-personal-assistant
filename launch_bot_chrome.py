@@ -7,6 +7,7 @@ CHROME_BINARY = "/usr/bin/google-chrome"
 PROFILE_DIR = Path("browser_profiles/bot").resolve()
 REMOTE_DEBUGGING_PORT = "9222"
 GENERATED_DIR = Path("data/generated_camera")
+DEFAULT_VIDEO_FILE = Path("assets/avatar_loop_slow.mp4")
 
 
 def _clear_stale_profile_locks(profile_dir: Path):
@@ -47,20 +48,7 @@ def _convert_video_to_y4m(video_path: Path) -> Path:
     return y4m_path
 
 
-def main():
-    parser = argparse.ArgumentParser(description="Launch Chrome for the meeting bot.")
-    parser.add_argument(
-        "--video-file",
-        type=Path,
-        help="Optional mp4/mkv/mov file to feed Chrome as a fake camera.",
-    )
-    parser.add_argument(
-        "--open-url",
-        default="https://meet.google.com",
-        help="URL to open after Chrome launches.",
-    )
-    args = parser.parse_args()
-
+def launch_chrome(video_file: Path | None = DEFAULT_VIDEO_FILE, open_url: str = "https://meet.google.com"):
     _clear_stale_profile_locks(PROFILE_DIR)
 
     cmd = [
@@ -72,18 +60,18 @@ def main():
         "--no-first-run",
         "--no-default-browser-check",
         "--new-window",
-        args.open_url,
+        open_url,
     ]
 
-    if args.video_file:
-        video_file = args.video_file.expanduser().resolve()
-        if not video_file.is_file():
-            raise FileNotFoundError(f"Video file not found: {video_file}")
+    if video_file:
+        resolved_video = video_file.expanduser().resolve()
+        if not resolved_video.is_file():
+            raise FileNotFoundError(f"Video file not found: {resolved_video}")
 
-        if video_file.suffix.lower() == ".y4m":
-            y4m_file = video_file
+        if resolved_video.suffix.lower() == ".y4m":
+            y4m_file = resolved_video
         else:
-            y4m_file = _convert_video_to_y4m(video_file)
+            y4m_file = _convert_video_to_y4m(resolved_video)
 
         cmd.extend(
             [
@@ -93,13 +81,41 @@ def main():
             ]
         )
 
+    return subprocess.Popen(cmd, start_new_session=True)
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Launch Chrome for the meeting bot.")
+    parser.add_argument(
+        "--video-file",
+        type=Path,
+        default=DEFAULT_VIDEO_FILE,
+        help="Optional mp4/mkv/mov file to feed Chrome as a fake camera.",
+    )
+    parser.add_argument(
+        "--open-url",
+        default="https://meet.google.com",
+        help="URL to open after Chrome launches.",
+    )
+    parser.add_argument(
+        "--no-wait",
+        action="store_true",
+        help="Launch Chrome and return immediately instead of waiting for Enter.",
+    )
+    args = parser.parse_args()
+
+    proc = launch_chrome(video_file=args.video_file, open_url=args.open_url)
+
     print("Launching Chrome with the bot profile.")
     if args.video_file:
-        print(f"Using fake camera video: {args.video_file}")
+        print(f"Using fake camera video: {args.video_file.expanduser().resolve()}")
+
+    if args.no_wait:
+        return 0
+
     print("Keep this window open while the worker runs.")
     print("Press Enter here when you want to close Chrome.")
 
-    proc = subprocess.Popen(cmd)
     try:
         input()
     except KeyboardInterrupt:

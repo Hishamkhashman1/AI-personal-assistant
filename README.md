@@ -2,32 +2,28 @@
 
 ## Local run
 
-1. Start Redis:
+1. Start everything in one command:
 ```bash
-redis-server
+python start_bot.py
 ```
 
-2. Start the API:
-```bash
-uvicorn app.main:app --reload
-```
+2. The launcher will:
+   - start Redis
+   - start the API
+   - start the RQ worker
+   - start Chrome with the bundled avatar loop video
+   - list your upcoming Meet-linked calendar events
+   - let you choose which one to join
 
-3. Start the RQ worker:
-```bash
-python worker.py
-```
-
-4. Open the bot Chrome profile for manual sign-in:
+If you want to launch Chrome by itself:
 ```bash
 python launch_bot_chrome.py
 ```
-Keep that Chrome window open while `python worker.py` runs.
 
-If you want Chrome to use a loop video as the bot camera:
+If you want a different loop video:
 ```bash
 python launch_bot_chrome.py --video-file /path/to/your-loop.mp4
 ```
-That converts the video to a Chrome fake-camera feed automatically.
 
 ## Calendar and Meet flow
 
