@@ -2,12 +2,13 @@ import argparse
 import subprocess
 from pathlib import Path
 
+from app.settings import BROWSER_PROFILE_DIR, GENERATED_CAMERA_DIR, BASE_DIR, env
 
-CHROME_BINARY = "/usr/bin/google-chrome"
-PROFILE_DIR = Path("browser_profiles/bot").resolve()
-REMOTE_DEBUGGING_PORT = "9222"
-GENERATED_DIR = Path("data/generated_camera")
-DEFAULT_VIDEO_FILE = Path("assets/avatar_loop_slow.mp4")
+CHROME_BINARY = env("CHROME_BINARY", "/usr/bin/google-chrome")
+PROFILE_DIR = BROWSER_PROFILE_DIR.resolve()
+REMOTE_DEBUGGING_PORT = env("CHROME_DEBUG_PORT", "9222")
+GENERATED_DIR = GENERATED_CAMERA_DIR
+DEFAULT_VIDEO_FILE = BASE_DIR / "assets" / "avatar_loop_slow.mp4"
 
 
 def _clear_stale_profile_locks(profile_dir: Path):

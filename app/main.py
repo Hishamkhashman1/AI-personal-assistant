@@ -1,9 +1,7 @@
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from pydantic import BaseModel
-from pathlib import Path
 import shutil
-import os
-
+from pathlib import Path
 
 from app.summarizer import summarize_meeting
 from app.memory import save_meeting, get_latest_meeting
@@ -15,18 +13,17 @@ from app.calendar_client import get_upcoming_events, get_next_event_with_meet_li
 
 from rq.job import Job
 from app.task_queue import redis_conn
-
-
-from openai import OpenAI
+from app.settings import BASE_DIR, get_openai_client
 
 
 #initiate Fastapi app
 app = FastAPI()
 
-ai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+ai_client = get_openai_client()
 
-AUDIO_DIR = Path("audio_samples")
-AUDIO_DIR.mkdir(exist_ok=True)
+AUDIO_DIR = BASE_DIR / "audio_samples"
+AUDIO_DIR.mkdir(parents=True, exist_ok=True)
+
 
 def process_meeting_transcript(title, transcript):
     path = save_meeting(title, transcript)
@@ -49,6 +46,7 @@ class JoinMeeting(BaseModel):
     title: str
     meeting_url: str
 
+
 def enqueue_meeting_job(title: str, meeting_url: str):
     job = queue.enqueue(
             join_meeting_job,
@@ -62,23 +60,24 @@ def enqueue_meeting_job(title: str, meeting_url: str):
 
 # Now define endpoints
 @app.post("/meeting/audio")
-def process_audio_meeeting(
+def process_audio_meeting(
     title: str = Form(...),
     file: UploadFile = File(...)
 ):
-    audio_path = AUDIO_DIR / file.filename
+    filename = Path(file.filename or "upload.wav").name
+    audio_path = AUDIO_DIR / filename
 
     with audio_path.open("wb") as buffer:
         shutil.copyfileobj(file.file, buffer)
 
-    transcript = transcribe_audio(file.filename)
+    transcript = transcribe_audio(filename)
 
-    meeting_result = process_meeting_transcript(title, transcript) 
+    meeting_result = process_meeting_transcript(title, transcript)
     return {
         "saved_audio_to": str(audio_path),
         "transcript": transcript,
         **meeting_result
-        }
+    }
 
 @app.post("/meeting/join")
 def join_meeting(data: JoinMeeting):

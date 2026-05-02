@@ -1,15 +1,11 @@
-import os
-from openai import OpenAI
-from dotenv import load_dotenv
+from app.settings import get_openai_client
 
-load_dotenv()
 
-# the ai client
-ai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+ai_client = get_openai_client()
 
 def summarize_meeting(transcript: str):
     prompt = f"""
-you are Hisham jr., a sharp meeting assistant.
+You are a sharp meeting assistant.
 
 Analyze the meeting transcript and return:
 

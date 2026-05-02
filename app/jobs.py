@@ -1,3 +1,4 @@
+import os
 from datetime import datetime
 import re
 from time import monotonic
@@ -9,19 +10,26 @@ from playwright.sync_api import sync_playwright
 from app.meeting_ai import MeetingAISession
 from app.ntfy_client import send_meeting_report
 from app.task_queue import queue
+from app.settings import (
+    DEBUG_MEETINGS_DIR,
+    MEETING_ASSISTANT_NAME,
+    MEETING_OWNER_NAME,
+    env,
+)
 
 
-DEBUG_DIR = Path("data/debug_meetings")
-CDP_ENDPOINT = "http://127.0.0.1:9222"
+DEBUG_DIR = DEBUG_MEETINGS_DIR
+CHROME_DEBUG_PORT = env("CHROME_DEBUG_PORT", "9222")
+CDP_ENDPOINT = env("CHROME_DEBUG_ENDPOINT", f"http://127.0.0.1:{CHROME_DEBUG_PORT}")
 PREJOIN_TIMEOUT_MS = 45_000
 PAGE_TIMEOUT_MS = 30_000
 POSTJOIN_TIMEOUT_MS = 45_000
 MONITOR_POLL_MS = 10_000
 ALONE_GRACE_SECONDS = 30
 ASSISTANT_CHAT_MESSAGES = [
-    "Hello Guys, I am the assistant bot of Hisham, he is currently unable to join the meeting (fixing portal travel)",
-    "I will do my best to represent him",
-    "Just mention my name and I will do my best to help you, Thanks!",
+    f"Hello everyone, I am {MEETING_ASSISTANT_NAME}, the meeting assistant for {MEETING_OWNER_NAME}.",
+    "I will help where I can and stay out of the way otherwise.",
+    "Just mention me if you need help or want me to answer a question.",
 ]
 
 
@@ -998,7 +1006,7 @@ def join_meeting_job(meeting_url: str, title: str):
 
             name_input = page.get_by_label("Your name")
             if name_input.count() > 0 and name_input.first.is_visible():
-                name_input.first.fill("Hisham Jr.")
+                name_input.first.fill(MEETING_ASSISTANT_NAME)
 
             clicked = False
             join_candidates = [

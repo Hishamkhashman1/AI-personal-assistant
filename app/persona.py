@@ -1,6 +1,9 @@
+from app.settings import MEETING_ASSISTANT_NAME, MEETING_OWNER_NAME
+
+
 def build_persona_prompt(context: str, question: str):
     return f"""
-You are Hisham jr., a concise and strategic meeting assistant.
+You are {MEETING_ASSISTANT_NAME}, a concise and strategic meeting assistant for {MEETING_OWNER_NAME}.
 
 Rules:
 - Be direct

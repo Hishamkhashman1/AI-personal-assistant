@@ -1,8 +1,8 @@
-import os
 from datetime import datetime
+import os
 import re
 
-BASE_PATH = "data/meetings"
+from app.settings import MEETINGS_DIR
 
 
 def _safe_slug(value: str) -> str:
@@ -10,9 +10,9 @@ def _safe_slug(value: str) -> str:
     return slug or "meeting"
 
 def save_meeting(title: str, transcript: str):
-    os.makedirs(BASE_PATH,exist_ok=True)
+    os.makedirs(MEETINGS_DIR, exist_ok=True)
     filename = f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_{_safe_slug(title)}.txt"
-    path = os.path.join(BASE_PATH, filename)
+    path = os.path.join(MEETINGS_DIR, filename)
 
     with open(path, "w") as f:
         f.write(transcript)
@@ -20,10 +20,10 @@ def save_meeting(title: str, transcript: str):
     return path
 
 def get_latest_meeting():
-    files = sorted(os.listdir(BASE_PATH))
+    files = sorted(os.listdir(MEETINGS_DIR))
     if not files:
         return None
 
     latest = files[-1]
-    with open(os.path.join(BASE_PATH, latest), "r") as f:
+    with open(os.path.join(MEETINGS_DIR, latest), "r") as f:
         return f.read()

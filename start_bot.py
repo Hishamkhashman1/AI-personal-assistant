@@ -10,12 +10,13 @@ from urllib import error, request
 from redis import Redis
 
 from launch_bot_chrome import DEFAULT_VIDEO_FILE, launch_chrome
+from app.settings import env, env_int
 
 
-API_URL = "http://127.0.0.1:8000"
-REDIS_HOST = "localhost"
-REDIS_PORT = 6379
-CHROME_DEBUG_PORT = 9222
+API_URL = env("ASSISTANT_API_URL", "http://127.0.0.1:8000")
+REDIS_HOST = env("REDIS_HOST", "localhost")
+REDIS_PORT = env_int("REDIS_PORT", 6379)
+CHROME_DEBUG_PORT = env_int("CHROME_DEBUG_PORT", 9222)
 
 
 class ManagedProcess:

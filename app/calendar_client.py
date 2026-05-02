@@ -1,5 +1,5 @@
 import datetime
-import os.path
+from pathlib import Path
 
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
@@ -7,23 +7,31 @@ from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 
+from app.settings import BASE_DIR, env
+
 SCOPES = ["https://www.googleapis.com/auth/calendar.readonly"]
+CLIENT_SECRETS_FILE = Path(env("GOOGLE_OAUTH_CLIENT_SECRETS", str(BASE_DIR / "credentials.json")))
+TOKEN_FILE = Path(env("GOOGLE_OAUTH_TOKEN_FILE", str(BASE_DIR / "token.json")))
 
 
 def _load_credentials():
     creds = None
-    if os.path.exists("token.json"):
-        creds = Credentials.from_authorized_user_file("token.json", SCOPES)
+    if TOKEN_FILE.exists():
+        creds = Credentials.from_authorized_user_file(str(TOKEN_FILE), SCOPES)
 
     if not creds or not creds.valid:
         if creds and creds.expired and creds.refresh_token:
             creds.refresh(Request())
         else:
-            flow = InstalledAppFlow.from_client_secrets_file("credentials.json", SCOPES)
+            if not CLIENT_SECRETS_FILE.exists():
+                raise FileNotFoundError(
+                    f"Google OAuth client secrets file not found: {CLIENT_SECRETS_FILE}"
+                )
+
+            flow = InstalledAppFlow.from_client_secrets_file(str(CLIENT_SECRETS_FILE), SCOPES)
             creds = flow.run_local_server(port=0)
 
-        with open("token.json", "w") as token:
-            token.write(creds.to_json())
+        TOKEN_FILE.write_text(creds.to_json())
 
     return creds
 

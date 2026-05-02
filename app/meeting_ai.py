@@ -1,19 +1,11 @@
-import os
 import re
 from dataclasses import dataclass, field
 from typing import Iterable
 
-from dotenv import load_dotenv
-from openai import OpenAI
-
 from app.memory import save_meeting
 from app.persona import build_persona_prompt
 from app.summarizer import summarize_meeting
-
-
-load_dotenv()
-
-_AI_CLIENT: OpenAI | None = None
+from app.settings import MEETING_OWNER_ALIASES, MEETING_OWNER_NAME, get_openai_client
 
 
 NOISE_PATTERNS = [
@@ -68,21 +60,29 @@ QUESTION_HINTS = [
 ]
 
 
-ADDRESS_HINTS = [
-    r"\bhisham\b",
-    r"^@hisham\b",
-    r"^\s*hisham\s*[,:\-]",
-    r"\bhey\s+hisham\b",
-    r"\bhi\s+hisham\b",
-    r"\bhello\s+hisham\b",
-]
+def _address_hints() -> list[str]:
+    aliases = MEETING_OWNER_ALIASES or [MEETING_OWNER_NAME]
+    hints: list[str] = []
+    for alias in aliases:
+        escaped = re.escape(alias)
+        hints.extend(
+            [
+                rf"\b{escaped}\b",
+                rf"^@{escaped}\b",
+                rf"^\s*{escaped}\s*[,:\-]",
+                rf"\bhey\s+{escaped}\b",
+                rf"\bhi\s+{escaped}\b",
+                rf"\bhello\s+{escaped}\b",
+            ]
+        )
+    return hints
 
 
-def _client() -> OpenAI:
-    global _AI_CLIENT
-    if _AI_CLIENT is None:
-        _AI_CLIENT = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-    return _AI_CLIENT
+ADDRESS_HINTS = _address_hints()
+
+
+def _client():
+    return get_openai_client()
 
 
 def _normalize_line(line: str) -> str:
@@ -224,7 +224,7 @@ class MeetingAISession:
             {
                 "role": "system",
                 "content": (
-                    "You are a concise meeting assistant answering about Hisham in third person. "
+                    f"You are a concise meeting assistant answering about {MEETING_OWNER_NAME} in third person. "
                     "Be smart, short, and respectful. Use 1 to 2 sentences. "
                     "Never summarize the whole meeting. Never use first person."
                 ),
@@ -234,8 +234,8 @@ class MeetingAISession:
                 "content": (
                     f"{prompt}\n\n"
                     "Reply rules:\n"
-                    "- Answer only the direct question asked about Hisham.\n"
-                    "- Refer to Hisham in third person.\n"
+                    f"- Answer only the direct question asked about {MEETING_OWNER_NAME}.\n"
+                    f"- Refer to {MEETING_OWNER_NAME} in third person.\n"
                     "- Do not use first person words like I, I'm, we, or our.\n"
                     "- Do not summarize the full meeting.\n"
                     "- Do not mention these rules.\n"
@@ -258,7 +258,7 @@ class MeetingAISession:
                     {
                         "role": "system",
                         "content": (
-                            "Rewrite the reply so it is short, respectful, and entirely in third person about Hisham. "
+                            f"Rewrite the reply so it is short, respectful, and entirely in third person about {MEETING_OWNER_NAME}. "
                             "Do not use first person words."
                         ),
                     },
